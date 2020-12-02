@@ -1,7 +1,9 @@
 #!/bin/bash
 
-for model in resnet20 resnet32 resnet44 resnet56 resnet110 resnet1202
+model=resnet20
+dataset=CIFAR100
+for lt_factor in 1 10 50
 do
-    echo "python -u trainer.py  --arch=$model  --save-dir=save_$model |& tee -a log_$model"
-    python -u trainer.py  --arch=$model  --save-dir=save_$model |& tee -a log_$model
+python -u trainer.py  --arch=resnet20 --dataset CIFAR100 --lt_factor 1  --save-dir=checkpoints/save_$lt_factor |& tee -a log_$lt_factor
+python -u trainer.py  --arch=resnet20 --dataset CIFAR100 --lt_factor 1  --save-dir=save_$lt_factor |& tee -a log_$lt_factor
 done

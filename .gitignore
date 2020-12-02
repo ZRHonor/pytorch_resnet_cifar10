@@ -1,0 +1,8 @@
+.history/
+.vscode/
+data/
+pretrained_models/
+checkpoints/
+save_1/
+__pycache__/
+log_1

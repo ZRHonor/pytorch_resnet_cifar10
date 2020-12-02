@@ -9,9 +9,12 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
+# from torch.utils.data import dataset
+# import torchvision.transforms as transforms
+# import torchvision.datasets as datasets
 import resnet
+
+from dataset import get_dataset
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -21,7 +24,7 @@ model_names = sorted(name for name in resnet.__dict__
 print(model_names)
 
 parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pytorch')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet32',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
                     ' (default: resnet32)')
@@ -55,19 +58,28 @@ parser.add_argument('--save-dir', dest='save_dir',
 parser.add_argument('--save-every', dest='save_every',
                     help='Saves checkpoints at every specified number of epochs',
                     type=int, default=10)
+parser.add_argument('--dataset', dest='dataset',
+                    help='[CIFAR10, CIFAR100]' ,
+                    type=str, default='CIFAR100')
+parser.add_argument('--lt_factor', dest='lt_factor',
+                    help='the imblance factor to create Long Tailed dataset' ,
+                    type=int, default=10)
 best_prec1 = 0
 
 
 def main():
     global args, best_prec1
     args = parser.parse_args()
-
+    print(args)
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    if args.dataset == 'CIFAR10':
+        model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    elif args.dataset == 'CIFAR100':
+        model = torch.nn.DataParallel(resnet.__dict__[args.arch](num_classes=100))
+    print(model)
     model.cuda()
 
     # optionally resume from a checkpoint
@@ -85,24 +97,15 @@ def main():
 
     cudnn.benchmark = True
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+    train_dataset, valid_dataset = get_dataset(args.dataset, args.lt_factor)
 
     train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, 4),
-            transforms.ToTensor(),
-            normalize,
-        ]), download=True),
+        train_dataset,
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
 
     val_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])),
+        valid_dataset,
         batch_size=128, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
@@ -155,7 +158,7 @@ def main():
         save_checkpoint({
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
-        }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+        }, is_best, filename=os.path.join(args.save_dir, 'model_{}_{}.th'.format(args.dataset, args.lt_factor)))
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -207,9 +210,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                  'best_prec1 {best_prec1:.4f}\t'.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
-                      data_time=data_time, loss=losses, top1=top1))
+                      data_time=data_time, loss=losses, top1=top1, best_prec1=best_prec1))
 
 
 def validate(val_loader, model, criterion):
