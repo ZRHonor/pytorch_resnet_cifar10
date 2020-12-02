@@ -13,8 +13,9 @@ import torch.utils.data
 # import torchvision.transforms as transforms
 # import torchvision.datasets as datasets
 import resnet
-
+import numpy as np
 from dataset import get_dataset
+from loss import get_loss_fn
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -64,6 +65,9 @@ parser.add_argument('--dataset', dest='dataset',
 parser.add_argument('--lt_factor', dest='lt_factor',
                     help='the imblance factor to create Long Tailed dataset' ,
                     type=int, default=10)
+parser.add_argument('--loss_fn', dest='loss_fn',
+                    help='loss function' ,
+                    type=str, default='CrossEntropyLoss')
 best_prec1 = 0
 
 
@@ -110,7 +114,8 @@ def main():
         num_workers=args.workers, pin_memory=True)
 
     # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = get_loss_fn(args.loss_fn)
+    # criterion = nn.CrossEntropyLoss().cuda()
 
     if args.half:
         model.half()
@@ -158,7 +163,7 @@ def main():
         save_checkpoint({
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
-        }, is_best, filename=os.path.join(args.save_dir, 'model_{}_{}.th'.format(args.dataset, args.lt_factor)))
+        }, is_best, filename=os.path.join(args.save_dir, '{}_{}_{}_{}.th'.format(args.loss_fn, args.arch, args.dataset, args.lt_factor)))
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -305,6 +310,14 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
+def accuracy_per_class(output, target, num_classes):
+    res = []
+    for i in range(num_classes):
+        idx = (target == i)
+        total = idx.sum()
+        prediction = torch.argmax(output[total])
+        res.append[0]
+    return np.array(res).mean(), res
 
 if __name__ == '__main__':
     main()
