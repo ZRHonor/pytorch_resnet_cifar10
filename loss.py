@@ -2,6 +2,7 @@ from torch.nn import CrossEntropyLoss
 from torch import nn
 
 class CBCELoss(nn.Module):
+    # TODO complete CBCELoss
     def __init__(self) -> None:
         pass
 
@@ -10,6 +11,7 @@ class CBCELoss(nn.Module):
 
 
 class GHMLoss(nn.Module):
+    # TODO complete GHMloss
     def __init__(self) -> None:
         pass
 
@@ -17,6 +19,7 @@ class GHMLoss(nn.Module):
         return 0
 
 class GGHMLoss(nn.Module):
+    # TODO complete GGHMloss
     def __init__(self) -> None:
         pass
 

@@ -81,7 +81,7 @@ def main():
         os.makedirs(args.save_dir)
     if args.dataset == 'CIFAR10':
         model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
-    elif args.dataset == 'CIFAR100':
+    else:
         model = torch.nn.DataParallel(resnet.__dict__[args.arch](num_classes=100))
     print(model)
     model.cuda()
@@ -311,6 +311,7 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 def accuracy_per_class(output, target, num_classes):
+    # TODO accuracy_per_class
     res = []
     for i in range(num_classes):
         idx = (target == i)
