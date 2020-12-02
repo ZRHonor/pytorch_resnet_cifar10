@@ -27,7 +27,7 @@ def get_dataset(dataset, lt_factor):
         if dataset == 'CIFAR10':
             num_examples = list(np.int32(np.linspace(1, 1/lt_factor, 10)*5000))
         else:
-            num_examples = list(np.int32(np.linspace(1, 1/lt_factor, 100)*5000))
+            num_examples = list(np.int32(np.linspace(1, 1/lt_factor, 100)*500))
         counter = 0
         for cat_id in train_dataset.targets:
             if num_examples[cat_id] > 0:

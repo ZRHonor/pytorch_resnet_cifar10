@@ -64,7 +64,7 @@ parser.add_argument('--dataset', dest='dataset',
                     type=str, default='CIFAR100')
 parser.add_argument('--lt_factor', dest='lt_factor',
                     help='the imblance factor to create Long Tailed dataset' ,
-                    type=int, default=10)
+                    type=int, default=1)
 parser.add_argument('--loss_fn', dest='loss_fn',
                     help='loss function' ,
                     type=str, default='CrossEntropyLoss')
@@ -74,16 +74,22 @@ best_prec1 = 0
 def main():
     global args, best_prec1
     args = parser.parse_args()
+    if args.lt_factor != 1:
+        args.epochs = int(args.epochs * 2 * (args.lt_factor)/(args.lt_factor+1))
     print(args)
-
+    
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
     if args.dataset == 'CIFAR10':
-        model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+        # model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+        model = resnet.__dict__[args.arch](num_classes=10)
+        num_classes=10
     else:
-        model = torch.nn.DataParallel(resnet.__dict__[args.arch](num_classes=100))
-    print(model)
+        # model = torch.nn.DataParallel(resnet.__dict__[args.arch](num_classes=100))
+        model = resnet.__dict__[args.arch](num_classes=100)
+        num_classes=100
+    # print(model)
     model.cuda()
 
     # optionally resume from a checkpoint
@@ -114,7 +120,7 @@ def main():
         num_workers=args.workers, pin_memory=True)
 
     # define loss function (criterion) and optimizer
-    criterion = get_loss_fn(args.loss_fn)
+    criterion = get_loss_fn(args.loss_fn, args.lt_factor, num_classes)
     # criterion = nn.CrossEntropyLoss().cuda()
 
     if args.half:
@@ -125,8 +131,7 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+    lr_schedular = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=args.epochs)
 
     if args.arch in ['resnet1202', 'resnet110']:
         # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
@@ -136,18 +141,18 @@ def main():
 
 
     if args.evaluate:
-        validate(val_loader, model, criterion)
+        validate(val_loader, model, criterion, num_classes)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
-        lr_scheduler.step()
+        train(train_loader, model, criterion, optimizer, epoch, num_classes)
+        lr_schedular.step()
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, num_classes)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -165,8 +170,14 @@ def main():
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, '{}_{}_{}_{}.th'.format(args.loss_fn, args.arch, args.dataset, args.lt_factor)))
 
+        if is_best:
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'best_prec1': best_prec1,
+            }, is_best, filename=os.path.join(args.save_dir, 'best.th'))
 
-def train(train_loader, model, criterion, optimizer, epoch):
+
+def train(train_loader, model, criterion, optimizer, epoch, num_classes):
     """
         Run one train epoch
     """
@@ -174,6 +185,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
+    # top1_per_class = AverageMeter(num_classes)
 
     # switch to train mode
     model.train()
@@ -203,8 +215,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
         loss = loss.float()
         # measure accuracy and record loss
         prec1 = accuracy(output.data, target)[0]
+        # prec1, prec_per_class, num_per_class = accuracy_per_class(output.data, target, num_classes)
+        prec1=prec1[0]
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
+        # top1_per_class.update(prec_per_class, num_per_class)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -221,13 +236,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       data_time=data_time, loss=losses, top1=top1, best_prec1=best_prec1))
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, num_classes):
     """
     Run evaluation
     """
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
+    top1_per_class = AverageMeter(num_classes)
 
     # switch to evaluate mode
     model.eval()
@@ -250,9 +266,12 @@ def validate(val_loader, model, criterion):
             loss = loss.float()
 
             # measure accuracy and record loss
-            prec1 = accuracy(output.data, target)[0]
+            # prec1 = accuracy(output.data, target)[0]
+            prec1, prec_per_class, num_per_class = accuracy_per_class(output.data, target, num_classes)
+            prec1=prec1[0]
             losses.update(loss.item(), input.size(0))
             top1.update(prec1.item(), input.size(0))
+            top1_per_class.update(prec_per_class, num_per_class)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -266,12 +285,12 @@ def validate(val_loader, model, criterion):
                           i, len(val_loader), batch_time=batch_time, loss=losses,
                           top1=top1))
 
-    print(' * Prec@1 {top1.avg:.3f}'
-          .format(top1=top1))
+    print(' * Prec@1 {top1.avg:.3f}'.format(top1=top1))
+    print('Prec per class\n{}'.format(top1_per_class.avg))
 
     return top1.avg
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, filename='checkpoint.pth.tar'):
     """
     Save the training model
     """
@@ -279,20 +298,32 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
+    def __init__(self, num_classes=1):
+        self.reset(num_classes)
+        # self.M = 1e8
 
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
+
+    def reset(self, num_classes):
+        if num_classes == 1:
+            self.val = 0
+            self.avg = 0
+            self.sum = 0
+            self.count = 0
+        else:
+            self.val = np.zeros(shape=(num_classes))
+            self.avg = np.zeros(shape=(num_classes))
+            self.sum = np.zeros(shape=(num_classes))
+            self.count = np.zeros(shape=(num_classes))
 
     def update(self, val, n=1):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        if type(self.count) == np.ndarray:
+            self.avg[self.count!=0] = self.sum[self.count!=0] / self.count[self.count!=0]
+            self.avg[self.count==0] = -1
+        else:
+            self.avg = self.sum / self.count
 
 
 def accuracy(output, target, topk=(1,)):
@@ -308,17 +339,26 @@ def accuracy(output, target, topk=(1,)):
     for k in topk:
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
-    return res
+    return res, []
 
 def accuracy_per_class(output, target, num_classes):
-    # TODO accuracy_per_class
+    batch_size = target.size(0)
     res = []
+    total = []
+    correct = 0
     for i in range(num_classes):
         idx = (target == i)
-        total = idx.sum()
-        prediction = torch.argmax(output[total])
-        res.append[0]
-    return np.array(res).mean(), res
+        total_i = idx.sum()
+        total.append(total_i.item())
+        if total_i == 0:
+            res.append(0)
+            continue
+        pred_i = torch.argmax(output[idx], 1)
+        # target_i = target[idx]
+        correct_i = (pred_i==i).sum()
+        res.append((correct_i/total_i).item())
+        correct += correct_i
+    return [correct.float()/batch_size], np.array(res), np.array(total)
 
 if __name__ == '__main__':
     main()
